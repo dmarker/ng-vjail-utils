@@ -63,37 +63,32 @@ connect_ether(int ngs, char *bridge, char *ether)
 {
 	int			rc;
 	static const int	mode = 1;
-	char			path[NG_PATHSIZ];
 	struct ngm_connect	cn[] = {
-#	define LO	0
 		{
-			.ourhook = "link0",
-			.peerhook = "lower"
+#	define UP	0
+			.ourhook = "upper",
+			.peerhook = "link1"
 		},{
-#	define UP	1
-			.ourhook = "link1",
-			.peerhook = "upper"
+#	define LO	1
+			.ourhook = "lower",
+			.peerhook = "link0"
 		}
 	};
 
-	strlcpy(path, bridge, sizeof(path));
-	//strlcat(path, ":", sizeof(path));
-
-	strlcpy(cn[LO].path, ether, sizeof(cn[LO].path));
-	//strlcat(cn[LO].path, ":", sizeof(cn[LO].path));
-	//strlcpy(cn[UP].path, cn[LO].path, sizeof(cn[UP].path));
-	strlcpy(cn[UP].path, ether, sizeof(cn[UP].path));
+	strlcpy(cn[LO].path, bridge, sizeof(cn[LO].path));
+	strlcpy(cn[UP].path, bridge, sizeof(cn[UP].path));
 
 	/* we need to have the iface in promisc mode */
-	rc = NgSendMsg(ngs, cn[UP].path, NGM_GENERIC_COOKIE,
+	rc = NgSendMsg(ngs, ether, NGM_ETHER_COOKIE,
 		    NGM_ETHER_SET_PROMISC, &mode, sizeof(mode));
+	(void) fprintf(stderr, "promisc=%d\n", rc);
 	if (-1 == rc) return (-1); /* must be able to put in this mode */
 
-	rc = NgSendMsg(ngs, path, NGM_GENERIC_COOKIE,
-	    NGM_CONNECT, &cn[LO], sizeof(cn[LO]));
-	rc = NgSendMsg(ngs, path, NGM_GENERIC_COOKIE,
+	rc = NgSendMsg(ngs, ether, NGM_GENERIC_COOKIE,
 	    NGM_CONNECT, &cn[UP], sizeof(cn[UP]));
-	return (0);
+	rc += NgSendMsg(ngs, ether, NGM_GENERIC_COOKIE,
+	    NGM_CONNECT, &cn[LO], sizeof(cn[LO]));
+	return (rc);
 }
 
 
@@ -102,6 +97,9 @@ int
 create_bridge(int ngs, char *bridge)
 {
 	struct ngm_name nm;
+	struct ngm_rmhook rm = {
+		.ourhook = "link0"
+	};
 	struct ngm_mkpeer mp = {
 		.type = "bridge",
 		.ourhook = "lower",
@@ -123,6 +121,10 @@ create_bridge(int ngs, char *bridge)
 
 	/* need to set NGM_BRIDGE_SET_PERSISTENT so it stays! */
 	if (-1 == NgSendMsg(ngs, bridge, NGM_BRIDGE_COOKIE, NGM_BRIDGE_SET_PERSISTENT, NULL, 0))
+		return (-1);
+
+	/* this socket is connected to link0, disconnect from it */
+	if (-1 == NgSendMsg(ngs, bridge, NGM_GENERIC_COOKIE, NGM_RMHOOK, &rm, sizeof(rm)))
 		return (-1);
 
 	return (0);
@@ -179,7 +181,7 @@ destroy_bridge(int ngs, char *bridge)
 			(void) strlcat(path, ":", sizeof(path));
 			/* remove promisc mode */
 
-			rc = NgSendMsg(ngs, path, NGM_GENERIC_COOKIE,
+			rc = NgSendMsg(ngs, path, NGM_ETHER_COOKIE,
 				    NGM_ETHER_SET_PROMISC, &prom, sizeof(prom));
 		}
 	}
