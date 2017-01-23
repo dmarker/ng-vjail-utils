@@ -81,14 +81,14 @@ connect_ether(int ngs, char *bridge, char *ether)
 	/* we need to have the iface in promisc mode */
 	rc = NgSendMsg(ngs, ether, NGM_ETHER_COOKIE,
 		    NGM_ETHER_SET_PROMISC, &mode, sizeof(mode));
-	(void) fprintf(stderr, "promisc=%d\n", rc);
 	if (-1 == rc) return (-1); /* must be able to put in this mode */
 
-	rc = NgSendMsg(ngs, ether, NGM_GENERIC_COOKIE,
+	/* return positive int ... */
+	(void) NgSendMsg(ngs, ether, NGM_GENERIC_COOKIE,
 	    NGM_CONNECT, &cn[UP], sizeof(cn[UP]));
-	rc += NgSendMsg(ngs, ether, NGM_GENERIC_COOKIE,
+	(void) NgSendMsg(ngs, ether, NGM_GENERIC_COOKIE,
 	    NGM_CONNECT, &cn[LO], sizeof(cn[LO]));
-	return (rc);
+	return (0);
 }
 
 

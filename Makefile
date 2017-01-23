@@ -24,6 +24,7 @@
 
 
 CC=/usr/bin/clang
+INSTALL=/usr/bin/install
 RM=/bin/rm
 
 CFLAGS=-std=c99 -g -Wall -Werror
@@ -49,9 +50,11 @@ ng-bridge.o : ng-bridge.c common.h
 ng-eiface.o : ng-eiface.c common.h
 	$(CC) $(CFLAGS) -DME=\"ng-eiface\" -c $< -o $@
 
-#install: ng-bridge ng-eiface
-#	$(INSTALL) ng-bridge /usr/local/bin/ng-bridge
-#	$(INSTALL) ng-eiface /usr/local/bin/ng-eiface
+install: ng-bridge ng-eiface netgraph
+	$(INSTALL) -o root -g wheel -m 555 netgraph /usr/local/etc/rc.d
+	$(INSTALL) -o root -g wheel ng-bridge /usr/local/bin
+	$(INSTALL) -o root -g wheel ng-eiface /usr/local/bin
+	echo "You must alter /etc/rc.d/netif to depend on netgraph"
 
 .PHONY:
 clean:

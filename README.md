@@ -49,16 +49,38 @@ To attach a new eiface you would need to scan the list of connected hooks, and p
 
 These utilities are just providing some simplicity. That simplicity in turn makes it easy to provide /usr/local/etc/rc.d/ngbr for setting up netgraph logical and physical bridges at boot (as well as removal at shutdown). It is also trivial to use ng-eiface in /etc/jail.conf to create then gift an interface to a jail.
 
-For example your /etc/jail.conf could have
+For example your /etc/rc.conf could have
+
+```
+ifconfig_hn0="inet 192.168.64.26 netmask 255.255.255.0"
+defaultrouter="192.168.64.1"
+
+netgraph_enable="YES"
+ngbridge_hn0="bridge-lan"
+ngbridge_lg0="bridge-jail"
+ngeiface_jail26="bridge-jail 00:0C:29:C3:72:F9"
+ifconfig_jail26="inet 10.10.0.26 netmask 255.255.255.0"
+
+```
+In this case I'm using Hyper-V network adapter. This should work fine with VMWare or even a physical interface. But you must be able to set the interface into promiscuous mode. For Hyper-V that requires adding additional permisions outside the guest VM.
+
+
+Your /etc/jail.conf could have
 ```
 somejail {
   vnet;
-  vnet.interface  = "lan30";
-  exex.prestart += "/usr/local/bin/ng-eiface -c bridge-lan lan30 01:02:03:04:05:06";
+  vnet.interface = lan30, jail30;
+  exec.prestart = "/usr/local/bin/ng-eiface -c bridge-lan lan30 00:15:5d:01:11:30";
+  exec.prestart += "/usr/local/bin/ng-eiface -c bridge-lan jail30 00:0C:29:39:B4:4C";
+  exec.start = "/bin/sh /etc/rc";
+  exec.stop = "/bin/sh /etc/rc.shutdown";
   exec.poststop += "/usr/local/bin/ng-eiface -d lan30";
+  exec.poststop += "/usr/local/bin/ng-eiface -d jail30";
   ...
 }
 ```
+
+It is vital to use comma for multiple `vnet.interface` and not quote them.
 
 Netgraph ng_eiface(4) in a jail can be configured exactly as if it were a device on the system (say em0). It can use DHCP to get an IP address and set resolv.conf.
 
@@ -70,5 +92,7 @@ rc scripts in the jail:
 
 With the netgraph interface, all of those scripts work just fine.
 
+You need to have `/etc/rc.d/netif` depend on `netgraph` which `make install` should have put into your `/usr/local/etc/rc.d`.
+
 ### TODO
-Need to create a script for /usr/loca/etc/rc.d/ngbr that looks for `ngbridge_<name>` or similar in /etc/rc.conf to set up the bridges at boot time.
+/usr/loca/etc/rc.d/netgraph is really bare bones.

@@ -1,0 +1,122 @@
+#!/bin/sh
+#
+#-
+# The MIT License (MIT)
+# 
+# Copyright (c) 2017 David Marker
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+
+# PROVIDE: netgraph
+# REQUIRE: FILESYSTEMS iovctl serial sppp sysctl
+# REQUIRE: hostid ipfilter ipfs
+# KEYWORD: nojailvnet
+
+. /etc/rc.subr
+
+name="netgraph"
+desc="Netgraph setup"
+rcvar="${name}_enable"
+start_cmd="netgraph_start"
+stop_cmd="netgraph_stop"
+
+
+#
+# For each physical bridge have:
+#	ngbridge_<ifname>="<bridge name>"
+# e.g.
+#	ngbridge_em0="bridge-lan"
+#
+# For each logical bridge use the the special ifname lgX
+#
+# e.g.
+#	ngbridge_lg0="bridge-jail"
+#
+# For each eiface you want to create at start up have:
+#	ngeiface_<name>="<bridge> <mac address>"
+#
+# e.g.
+#	ngeiface_jail0="bridge-jail 00:0C:29:C3:72:F9"
+#
+# Probably only eiface for this system, jails should only have eiface
+# configured in exec.prestart and torn down in exec.poststop.
+#
+#
+# This version has no finger guards. If you say bridge-foo=em0 but don't have
+# an em0, then ng-bridge will probably spew errors at you and create a
+# logical bridge.
+#
+# BUGS: probably a *way* better start/stop script could be created.
+#       Hopefully somebody with better sh skills comes along for that.
+#
+
+NGBRIDGE=/usr/local/bin/ng-bridge
+NGEIFACE=/usr/local/bin/ng-eiface
+
+netgraph_start()
+{
+	# Important to create bridges first
+	for bridge in `list_vars ngbridge_*`
+	do
+		ethname="${bridge##ngbridge_}"
+		brname=$(eval echo \$${bridge})
+		case ${ethname} in
+		lg*)
+			# logical bridge
+			${NGBRIDGE} -c ${brname}
+			;;
+
+		*)
+			# physical bridge
+			${NGBRIDGE} -c ${brname} ${ethname}
+			;;
+		esac
+	done
+
+	for eiface in `list_vars ngeiface_*`
+	do
+		eifname="${eiface##ngeiface_}"
+		args=$(eval echo \$${eiface})
+		brname="${args%% *}"
+		mac="${args##* }"
+		${NGEIFACE} -c ${brname} ${eifname} ${mac}
+
+	done
+}
+
+netgraph_stop()
+{
+	# Order doesn't actually matter. But for sake of symmetry do in reverse
+	for eiface in `list_vars ngeiface_*`
+	do
+		eifname="${eiface##ngeiface_}"
+		${NGEIFACE} -d ${eifname}
+	done
+
+	for bridge in `list_vars ngbridge_*`
+	do
+		brname=$(eval echo \$${bridge})
+		${NGBRIDGE} -d ${brname}
+	done
+}
+
+
+load_rc_config $name
+run_rc_command $*
