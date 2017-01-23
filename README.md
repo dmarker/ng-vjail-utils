@@ -4,6 +4,17 @@ Utilities to use [Netgraph](https://people.freebsd.org/~julian/netgraph.html) wi
 ### Utilities Provided
  - ng-bridge: create/destroy a physical or logical bridge
  - ng-eiface: create an eiface and add to bridge or destroy an eiface
+
+### Prerequisites
+Ability to build your own kernel adding these options
+
+```
+options         NETGRAPH
+options         NETGRAPH_ETHER
+options         NETGRAPH_EIFACE
+options         NETGRAPH_BRIDGE
+options         NETGRAPH_SOCKET
+```
  
 ### Command Summary
 ```sh
