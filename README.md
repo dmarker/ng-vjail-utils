@@ -1,5 +1,6 @@
 # ng-vjail-utils
 Utilities to use [Netgraph](https://people.freebsd.org/~julian/netgraph.html) with VIMAGE/VNET jails in [FreeBSD](https://www.freebsd.org).
+NOTE: this has been updated in anticipation of this [PR](https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=278130) with this [review](https://reviews.freebsd.org/D44615) being merged.
 
 ### Utilities Provided
  - ng-bridge: create/destroy a physical or logical bridge
@@ -56,24 +57,25 @@ Ether is put in promiscuous mode (because it must be) when creating a bridge wit
 
 These utilities do *nothing* you can't already do with ngctl(8) and ifconfig(8). For a logical bridge you would have to create a file or run ngctl(8) with interactive mode. But it is perfectly capable.
 
-To attach a new eiface you would need to scan the list of connected hooks, and pick one out that is available. Additionally you would change its name with both ngctl(8) and ifconfig(8).
+To attach a new eiface you would need to connect it using `link` which will pick the lowest available `linkX` for the bridge. Additionally you would change its name with both ngctl(8) and ifconfig(8).
 
-These utilities are just providing some simplicity. That simplicity in turn makes it easy to provide /usr/local/etc/rc.d/ngbr for setting up netgraph logical and physical bridges at boot (as well as removal at shutdown). It is also trivial to use ng-eiface in /etc/jail.conf to create then gift an interface to a jail.
+These utilities are just providing some simplicity. That simplicity in turn makes it easy to provide /usr/local/etc/rc.d/netgraph for setting up netgraph logical or physical bridges and eifaces at boot (as well as removal at shutdown). It is also trivial to use ng-eiface in /etc/jail.conf to create then gift an interface to a jail.
 
 For example your /etc/rc.conf could have
 
 ```
-ifconfig_hn0="inet 192.168.64.26 netmask 255.255.255.0"
+ifconfig_re0="inet 192.168.64.26 netmask 255.255.255.0"
 defaultrouter="192.168.64.1"
 
 netgraph_enable="YES"
-ngbridge_hn0="bridge-lan"
+ngbridge_re0="bridge-lan"
 ngbridge_lg0="bridge-jail"
-ngeiface_jail26="bridge-jail 00:0C:29:C3:72:F9"
-ifconfig_jail26="inet 10.10.0.26 netmask 255.255.255.0"
+# jail0 is not gifted to a jail it is for host system to use bridge-jail as network with jails.
+ngeiface_jail0="bridge-jail 00:0C:29:C3:72:F9"
+ifconfig_jail0="inet 10.10.0.26 netmask 255.255.255.0"
 
 ```
-In this case I'm using Hyper-V network adapter. This should work fine with VMWare or even a physical interface. But you must be able to set the interface into promiscuous mode. For Hyper-V that requires adding additional permisions outside the guest VM.
+In this case I'm using a realtek network adapter. You must be able to set the interface into promiscuous mode. Not all physical drivers play perfectly with ng_bridge(4). In particular the realtek with releng/14 is able to ping jails connected to bridge-lan while stable/14 requires the realtek driver from ports and it is not able to ping jails connected to bridge-lan. But this is another reason to have bridge-jail.
 
 
 Your /etc/jail.conf could have
@@ -85,25 +87,37 @@ somejail {
   exec.prestart += "/usr/local/bin/ng-eiface -c bridge-lan jail30 00:0C:29:39:B4:4C";
   exec.start = "/bin/sh /etc/rc";
   exec.stop = "/bin/sh /etc/rc.shutdown";
+  exec.poststop += "/bin/sleep 2";
   exec.poststop += "/usr/local/bin/ng-eiface -d lan30";
   exec.poststop += "/usr/local/bin/ng-eiface -d jail30";
   ...
 }
 ```
 
-It is vital to use comma for multiple `vnet.interface` and not quote them.
+It is vital to use comma for multiple `vnet.interface` and not quote them. You will get a panic on jail shutdown if you don't have the `sleep 2`.
 
-Netgraph ng_eiface(4) in a jail can be configured exactly as if it were a device on the system (say em0). It can use DHCP to get an IP address and set resolv.conf.
+Netgraph ng_eiface(4) in a jail can be configured exactly as if it were a device on the system (say em0). It can use DHCP to get an IP address and set resolv.conf but that requires two things.
 
-However, you have to remove the `nojail` and `novjailvnet` keywords from three
-rc scripts in the jail:
+First you must have added this (or similar to unhide `bpf` for DHCP) to /etc/devfs.rules:
+```
+[devfsrules_jail_vnet_dhcp=6]
+add include $devfsrules_hide_all
+add include $devfsrules_unhide_basic
+add include $devfsrules_unhide_login
+add include $devfsrules_jail
+add path pf unhide
+add path 'bpf*' unhide
+```
+
+Next, you have to remove the `nojail` and `novjailvnet` keywords from three rc scripts in the jail:
 - /etc/rc.d/defaultroute
 - /etc/rc.d/netif
 - /etc/rc.d/routing
 
-With the netgraph interface, all of those scripts work just fine.
+With the netgraph interface, all of those scripts work just fine. You should be aware that DHCP requiring bpf is not secure. It means any jail gets total access to the physical network device. You are better off manually setting IPv4 addresses or using IPv6 (but not DHCP). You must alter those 3 scripts even if not using DHCP for the networking to configure.
 
-You need to have `/etc/rc.d/netif` depend on `netgraph` which `make install` should have put into your `/usr/local/etc/rc.d`.
+It used to be that you had to attach a physical ethernet to a bridge before bringing it up, that doesn't appear true anymore.
+But I still have `/etc/rc.d/netif` depend on `netgraph` which `make install` should have put into your `/usr/local/etc/rc.d`.
 
 ### TODO
 /usr/loca/etc/rc.d/netgraph is really bare bones.

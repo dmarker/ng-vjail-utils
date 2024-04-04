@@ -51,7 +51,9 @@ ng-eiface.o : ng-eiface.c common.h
 	$(CC) $(CFLAGS) -DME=\"ng-eiface\" -c $< -o $@
 
 install: ng-bridge ng-eiface netgraph
+	$(INSTALL) -o root -g wheel -m 755 -d /usr/local/etc/rc.d
 	$(INSTALL) -o root -g wheel -m 555 netgraph /usr/local/etc/rc.d
+	$(INSTALL) -o root -g wheel -m 755 -d /usr/local/bin
 	$(INSTALL) -o root -g wheel ng-bridge /usr/local/bin
 	$(INSTALL) -o root -g wheel ng-eiface /usr/local/bin
 	echo "You must alter /etc/rc.d/netif to depend on netgraph"

@@ -24,6 +24,7 @@
 
 #include "common.h"
 
+#include <net/ethernet.h>
 #include <netgraph/ng_bridge.h>
 #include <sys/ioctl.h>
 #include <net/if_dl.h>
@@ -32,100 +33,78 @@
 
 /* FUNCTIONS */
 
-/*
- * return -1 if nothing available or err, otherwise return id that can be used.
- */
-int
-lowest_hook(int ngs, const char *bridge)
-{
-	int		rc, idx;
-	struct ng_mesg	*resp;
-	struct hooklist *hlist;
-	struct nodeinfo	*ninfo;
-
-	/* Makefile generates same number strings in LinkMap */
-	int		avail[NG_BRIDGE_MAX_LINKS] = {0};
-
-	rc = NgSendMsg(ngs, bridge, NGM_GENERIC_COOKIE, NGM_LISTHOOKS, NULL, 0);
-	if (-1 == rc) return (-1);
-	if (-1 == NgAllocRecvMsg(ngs, &resp, NULL)) return (-1);
-
-	hlist = (struct hooklist *) resp->data;
-	ninfo = &hlist->nodeinfo;
-
-	/*
-	 * because we have no order guarantee we scan through all existing
-	 * links to see what is taken. The links are called `link<x>` where
-	 * X is a zero based index into LinkMap.
-	 */
-	for (idx = 0; idx < ninfo->hooks; idx++) {
-		struct linkinfo *const link = &hlist->link[idx];
-		const char *key = link->ourhook + sizeof("link") - 1;
-		sscanf(key, "%d", &rc);
-		avail[rc] = 1;
-	}	
-	free(resp);
-	/* accounted for all links */
-
-	/* return first one avaiable or leave result as NULL */
-	for (idx = 0; idx < NG_BRIDGE_MAX_LINKS; idx++) {
-		if (0 == avail[idx])
-			return (idx);
-	}
-	return (-1);
-}
-
-
+/* we just use "link" which will give us the lowest hook */
 static int
 create_eiface(int ngs, const char *bridge, const char *eiface)
 {
 	int rc, skt;
-        char path[NG_PATHSIZ];
 	struct ngm_name nm;
+	struct ngm_rmhook rm = {
+		.ourhook = "ether"
+	};
 	struct ngm_mkpeer mp = {
 		.type = "eiface",
-		.ourhook = "link", /* must append number! */
+		.ourhook = "lower", /* was "linkN", */
 		.peerhook = "ether"
+	};
+	struct ngm_connect cn = {
+		/* .path = eiface, */
+		.ourhook = "link",
+		.peerhook = "ether",
 	};
 	struct ng_mesg	*resp;
 	struct nodeinfo *ninfo;
 	struct ifreq	ifr;
 
-	rc = lowest_hook(ngs, bridge);
-	(void) snprintf(mp.ourhook, sizeof(mp.ourhook), "link%d", rc);
-        //(void) strlcat(mp.ourhook, rc, sizeof(mp.ourhook));
+	/* create it connected to our ngs, this lets us find it */
+	if (-1 == NgSendMsg(ngs, ".:", NGM_GENERIC_COOKIE, NGM_MKPEER, &mp, sizeof(mp)))
+		return (-1);
 
-        rc = NgSendMsg(ngs, bridge, NGM_GENERIC_COOKIE, NGM_MKPEER,
-            &mp, sizeof(mp));
-        if (-1 == rc) return (-1);
-
-        /* lookup the name it just got. */
-        (void) strlcpy(path, bridge, sizeof(path));
-        (void) strlcat(path, mp.ourhook, sizeof(path));
-
-        rc = NgSendMsg(ngs, path, NGM_GENERIC_COOKIE, NGM_NODEINFO, NULL, 0);
-        if (-1 == rc) return (-1);
+	/* but we do need to know what name it got to change the interface name for ifconfig */
+        rc = NgSendMsg(ngs, ".:lower", NGM_GENERIC_COOKIE, NGM_NODEINFO, NULL, 0);
+        if (-1 == rc) {
+		(void) fprintf(stderr, "failed nodeinfo\n");
+		return (-1);
+	}
 
         rc = NgAllocRecvMsg(ngs, &resp, NULL);
-        if (-1 == rc) return (-1);
-
+        if (-1 == rc) {
+		(void) fprintf(stderr, "failed nodeinfo:recvmsg\n");
+		return (-1);
+	}
 	ninfo = (struct nodeinfo *) resp->data;
-        (void) strlcpy(nm.name, eiface, sizeof(nm.name));
+	(void) strlcpy(nm.name, eiface, sizeof(nm.name));
 	*(nm.name + strlen(nm.name) - 1) = '\0'; /* remove ':' */
 
 	strncpy(ifr.ifr_name, ninfo->name, sizeof(ifr.ifr_name));
 	ifr.ifr_data = nm.name;
-
-        (void) strlcpy(path, ninfo->name, sizeof(path));
-	(void) strlcat(path, ":", sizeof(path));
 	free(resp);
 
-	rc = NgSendMsg(ngs, path, NGM_GENERIC_COOKIE, NGM_NAME, &nm, sizeof(nm));
-	if (-1 == rc) return (-1);
+	if (-1 == NgSendMsg(ngs, ".:lower", NGM_GENERIC_COOKIE, NGM_NAME, &nm, sizeof(nm))) {
+		(void) fprintf(stderr, "failed rename\n");
+		return (-1);
+	}
 
-	/* rename interface too */
-	if (-1 == (skt = socket(AF_LOCAL, SOCK_DGRAM, 0))) return (-1);
-	if (-1 == ioctl(skt, SIOCSIFNAME, &ifr)) return (-1);
+	if (-1 == NgSendMsg(ngs, eiface, NGM_GENERIC_COOKIE, NGM_RMHOOK, &rm, sizeof(rm))) {
+		(void) fprintf(stderr, "failed un-hook\n");
+		return (-1);
+	}
+
+	(void) strlcpy(cn.path, eiface, sizeof(cn.path));
+	if (-1 == NgSendMsg(ngs, bridge, NGM_GENERIC_COOKIE, NGM_CONNECT, &cn, sizeof(cn))) {
+		(void) fprintf(stderr, "failed connection\n");
+		return (-1);
+	}
+
+	// rename interface too
+	if (-1 == (skt = socket(AF_LOCAL, SOCK_DGRAM, 0))) {
+		(void) fprintf(stderr, "failed socket\n");
+		return (-1);
+	}
+	if (-1 == ioctl(skt, SIOCSIFNAME, &ifr)) {
+		(void) fprintf(stderr, "failed ioctl\n");
+		return (-1);
+	}
 
         (void) close(skt);
 
@@ -269,9 +248,11 @@ main(int argc, char **argv)
 	cflag = 0;
 	dflag = 0;
 
+	setvbuf(stdout, NULL, _IONBF, BUFSIZ);
+
 	/* valid args
 	 *	ng-eiface -c brname ifname macaddr
-         *      ng-bridge -d ifname
+	 *	ng-bridge -d ifname
 	 */
 	if (argc < 3) USAGE;
 

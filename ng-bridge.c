@@ -23,6 +23,8 @@
  */
 #include "common.h"
 
+#include <errno.h>
+#include <net/ethernet.h>
 #include <netgraph/ng_bridge.h>
 #include <netgraph/ng_ether.h>
 
@@ -67,11 +69,11 @@ connect_ether(int ngs, char *bridge, char *ether)
 		{
 #	define UP	0
 			.ourhook = "upper",
-			.peerhook = "link1"
+			.peerhook = "link0"
 		},{
 #	define LO	1
 			.ourhook = "lower",
-			.peerhook = "link0"
+			.peerhook = "uplink1" /* new feature */
 		}
 	};
 
@@ -159,7 +161,7 @@ destroy_bridge(int ngs, char *bridge)
 #	endif
 
 
-	/* all interfaces can be removed, if link0 is ether then set promis off */
+	/* all interfaces can be removed, if link0 is ether then set promisc off */
 	for (idx = 0; idx < ninfo->hooks; idx++) {
 		struct linkinfo *const link = &hlist->link[idx];
 		char *type = link->nodeinfo.type;
@@ -215,6 +217,7 @@ main(int argc, char **argv)
 	cflag = 0;
 	dflag = 0;
 
+	setvbuf(stdout, NULL, _IONBF, BUFSIZ);
 
 	/* valid args
 	 *	ng-bridge -c bridge
@@ -291,7 +294,7 @@ main(int argc, char **argv)
 		}
 		if (0 != (rc = create_bridge(ngskt, bridge))) {
 			(void) fprintf(stderr,
-			    ME ": Error: failed to create: %s bridge\n", bridge
+			    ME ": Error: failed to create: %s bridge: %d\n", bridge, errno
 			);
 			exit(-1);
 		} else {
@@ -335,5 +338,4 @@ main(int argc, char **argv)
 	}
 
 	return (0);
-
 }
